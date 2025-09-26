@@ -133,7 +133,8 @@ with tab2:
         "Что такое доверенное устройство (Local_About_Trusted_Device)",
         "Что такое секретный код (Local_About_Secret_Code)"
     ]
-    st.write(", ".join(unused_topics))
+    for topic in unused_topics:
+        st.markdown(f"- {topic}")
 
 
 # ============= TAB 3: ДА/НЕТ =============
