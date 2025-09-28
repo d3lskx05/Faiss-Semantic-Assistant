@@ -1,15 +1,15 @@
 import streamlit as st
 from utils import load_all_excels, semantic_search, keyword_search, get_model
 import torch  # для работы с тензорами
-import numpy as np
-import faiss  # pip install faiss-cpu
 
 st.set_page_config(page_title="Проверка фраз ФЛ", layout="centered")
 st.title("🤖 Проверка фраз")
 
 @st.cache_data
 def get_data():
-    df = load_all_excels()  # Уже включает Faiss индекс
+    df = load_all_excels()
+    model = get_model()
+    df.attrs['phrase_embs'] = model.encode(df['phrase_proc'].tolist(), convert_to_tensor=True)
     return df
 
 df = get_data()
@@ -44,27 +44,20 @@ with tab1:
 
     # 📥 Поисковый запрос
     query = st.text_input("Введите ваш запрос:")
+
     if query:
         try:
             search_df = df
             if filter_search_by_topics and selected_topics:
                 mask = df['topics'].apply(lambda topics: any(t in selected_topics for t in topics))
-                search_df = df[mask].copy()  # Копируем, чтобы не менять оригинал
+                search_df = df[mask].copy()
 
-                # Строим Faiss индекс для фильтрованного DF
+                # Пересчитываем эмбеддинги для фильтрованного DF (надежнее)
                 if not search_df.empty:
                     model = get_model()
-                    phrase_embs_tensor = model.encode(search_df["phrase_proc"].tolist(), convert_to_tensor=True)
-                    phrase_embs_np = phrase_embs_tensor.cpu().numpy()
-                    d = phrase_embs_np.shape[1]
-                    index = faiss.IndexFlatIP(d)
-                    faiss.normalize_L2(phrase_embs_np)
-                    index.add(phrase_embs_np)
-                    search_df.attrs["faiss_index"] = index
-                    search_df.attrs["phrase_embs"] = phrase_embs_tensor
-                    st.success(f"✅ Faiss индекс для фильтрованного DF: {index.ntotal} векторов")  # Замена print на st.success
+                    search_df.attrs['phrase_embs'] = model.encode(search_df['phrase_proc'].tolist(), convert_to_tensor=True)
                 else:
-                    search_df.attrs["faiss_index"] = None
+                    search_df.attrs['phrase_embs'] = torch.empty((0, 384))  # Пустой тензор (пример dim=384 для модели)
 
             if search_df.empty:
                 st.warning("Нет данных для поиска по выбранным тематикам.")
@@ -105,6 +98,7 @@ with tab1:
                                     st.markdown(comment)
                 else:
                     st.info("Ничего не найдено в точном поиске.")
+
         except Exception as e:
             st.error(f"Ошибка при обработке запроса: {e}")
 
@@ -136,9 +130,7 @@ with tab2:
     for topic in unused_topics:
         st.markdown(f"- {topic}")
 
-
 # ============= TAB 3: ДА/НЕТ =============
-
 def render_phrases_grid(phrases, cols=3, color="#e0f7fa"):
     rows = [phrases[i:i+cols] for i in range(0, len(phrases), cols)]
     for row in rows:
