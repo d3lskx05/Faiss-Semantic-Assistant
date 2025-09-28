@@ -7,8 +7,6 @@ from sentence_transformers import SentenceTransformer, util
 import pymorphy2
 import functools
 import os
-import numpy as np
-import faiss  # pip install faiss-cpu
 
 # ---------- модель и морфологический разбор ----------
 @functools.lru_cache(maxsize=1)
@@ -39,7 +37,7 @@ for group in SYNONYM_GROUPS:
         SYNONYM_DICT[lemma] = lemmas
 
 GITHUB_CSV_URLS = [
-    "https://raw.githubusercontent.com/codskxqq5/razmetka-assistantskx/main/data4.xlsx"",
+    "https://raw.githubusercontent.com/skatzrskx55q/data-assistant-vfiziki/main/data6.xlsx",
     "https://raw.githubusercontent.com/skatzrsk/semantic-assistant/main/data21.xlsx",
     "https://raw.githubusercontent.com/skatzrsk/semantic-assistant/main/data31.xlsx"
 ]
@@ -99,22 +97,10 @@ def load_all_excels():
         raise ValueError("Не удалось загрузить ни одного файла")
     df = pd.concat(dfs, ignore_index=True)
     
-    # Вычисляем эмбеддинги
+    # Вычисляем эмбеддинги для семантического поиска (один раз)
     model = get_model()
-    phrase_embs_tensor = model.encode(df["phrase_proc"].tolist(), convert_to_tensor=True)
-    phrase_embs_np = phrase_embs_tensor.cpu().numpy()  # Конверт в numpy для Faiss
+    df.attrs["phrase_embs"] = model.encode(df["phrase_proc"].tolist(), convert_to_tensor=True)
     
-    # Строим индекс Faiss (IndexFlatIP для inner product = cosine после нормализации)
-    d = phrase_embs_np.shape[1]  # Размерность эмбеддинга
-    index = faiss.IndexFlatIP(d)
-    faiss.normalize_L2(phrase_embs_np)  # Нормализуем для cosine sim
-    index.add(phrase_embs_np)  # Добавляем вектора
-    
-    # Сохраняем в attrs
-    df.attrs["faiss_index"] = index
-    df.attrs["phrase_embs"] = phrase_embs_tensor  # Для совместимости, если нужно
-    
-    print(f"✅ Faiss индекс построен: {index.ntotal} векторов, dim={d}")
     return df
 
 # ---------- удаление дублей ----------
@@ -145,34 +131,13 @@ def semantic_search(query, df, top_k=5, threshold=0.5):
     model = get_model()
     query_proc = preprocess(query)
     query_emb = model.encode(query_proc, convert_to_tensor=True)
-    
-    # Проверяем наличие Faiss индекса
-    if "faiss_index" in df.attrs:
-        # Используем Faiss
-        query_emb_np = query_emb.cpu().numpy().reshape(1, -1)
-        faiss.normalize_L2(query_emb_np)  # Нормализуем
-        
-        index = df.attrs["faiss_index"]
-        scores, indices = index.search(query_emb_np, top_k * 2)  # Больше, чтобы отфильтровать threshold
-        
-        results = []
-        for i, (score, idx) in enumerate(zip(scores[0], indices[0])):
-            if idx == -1 or score < threshold:
-                continue
-            row = df.iloc[idx]
-            results.append((float(score), row["phrase_full"], row["topics"], row["comment"]))
-        
-        results = sorted(results, key=lambda x: x[0], reverse=True)[:top_k]
-    else:
-        # Fallback на torch cosine (если индекса нет)
-        phrase_embs = df.attrs["phrase_embs"]
-        sims = util.pytorch_cos_sim(query_emb, phrase_embs)[0]
-        results = [
-            (float(score), df.iloc[idx]["phrase_full"], df.iloc[idx]["topics"], df.iloc[idx]["comment"])
-            for idx, score in enumerate(sims) if float(score) >= threshold
-        ]
-        results = sorted(results, key=lambda x: x[0], reverse=True)[:top_k]
-    
+    phrase_embs = df.attrs["phrase_embs"]
+    sims = util.pytorch_cos_sim(query_emb, phrase_embs)[0]
+    results = [
+        (float(score), df.iloc[idx]["phrase_full"], df.iloc[idx]["topics"], df.iloc[idx]["comment"])
+        for idx, score in enumerate(sims) if float(score) >= threshold
+    ]
+    results = sorted(results, key=lambda x: x[0], reverse=True)[:top_k]
     return deduplicate_results(results)
 
 def keyword_search(query, df):
