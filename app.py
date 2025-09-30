@@ -1,9 +1,46 @@
 import streamlit as st
 from utils import load_all_excels, semantic_search, keyword_search, get_model
 import torch  # для работы с тензорами
+import time
+try:
+    import psutil
+except Exception:
+    psutil = None
+
 
 st.set_page_config(page_title="Проверка фраз ФЛ", layout="centered")
 st.title("🤖 Проверка фраз")
+
+
+def read_system_metrics(interval=0.0):
+    """
+    Возвращает tuple (cpu_percent, ram_percent, used_gb, total_gb).
+    Если psutil не установлен — возвращает (None, None, None, None).
+    """
+    if psutil:
+        cpu = psutil.cpu_percent(interval=interval)
+        vm = psutil.virtual_memory()
+        used_gb = vm.used / 1024 ** 3
+        total_gb = vm.total / 1024 ** 3
+        return cpu, vm.percent, used_gb, total_gb
+    return None, None, None, None
+
+
+# === небольшая панель "Система" ===
+sys_cols = st.columns([1, 1, 1])
+cpu_ph = sys_cols[0].empty()
+ram_ph = sys_cols[1].empty()
+lat_ph = sys_cols[2].empty()
+
+cpu, ram_pct, used_gb, total_gb = read_system_metrics()
+if cpu is not None:
+    cpu_ph.metric("CPU", f"{cpu:.1f}%")
+    ram_ph.metric("RAM", f"{used_gb:.1f}/{total_gb:.1f} ГБ ({ram_pct:.0f}%)")
+else:
+    cpu_ph.text("psutil не установлен")
+    ram_ph.text("psutil не установлен")
+lat_ph.text("Последний запрос: —")
+
 
 @st.cache_data
 def get_data():
@@ -11,6 +48,7 @@ def get_data():
     model = get_model()
     df.attrs['phrase_embs'] = model.encode(df['phrase_proc'].tolist(), convert_to_tensor=True)
     return df
+
 
 df = get_data()
 
@@ -46,6 +84,7 @@ with tab1:
     query = st.text_input("Введите ваш запрос:")
 
     if query:
+        start = time.perf_counter()
         try:
             search_df = df
             if filter_search_by_topics and selected_topics:
@@ -57,7 +96,7 @@ with tab1:
                     model = get_model()
                     search_df.attrs['phrase_embs'] = model.encode(search_df['phrase_proc'].tolist(), convert_to_tensor=True)
                 else:
-                    search_df.attrs['phrase_embs'] = torch.empty((0, 384))  # Пустой тензор (пример dim=384 для модели)
+                    search_df.attrs['phrase_embs'] = torch.empty((0, 384))  # Пустой тензор
 
             if search_df.empty:
                 st.warning("Нет данных для поиска по выбранным тематикам.")
@@ -99,7 +138,20 @@ with tab1:
                 else:
                     st.info("Ничего не найдено в точном поиске.")
 
+            # --- обновляем метрики после запроса ---
+            elapsed_ms = (time.perf_counter() - start) * 1000.0
+            cpu, ram_pct, used_gb, total_gb = read_system_metrics(interval=0.05)
+            if cpu is not None:
+                cpu_ph.metric("CPU", f"{cpu:.1f}%")
+                ram_ph.metric("RAM", f"{used_gb:.1f}/{total_gb:.1f} ГБ ({ram_pct:.0f}%)")
+            else:
+                cpu_ph.text("psutil не установлен")
+                ram_ph.text("psutil не установлен")
+            lat_ph.metric("Последний запрос", f"{elapsed_ms:.0f} ms")
+
         except Exception as e:
+            elapsed_ms = (time.perf_counter() - start) * 1000.0
+            lat_ph.metric("Последний запрос", f"{elapsed_ms:.0f} ms")
             st.error(f"Ошибка при обработке запроса: {e}")
 
 
@@ -111,7 +163,7 @@ with tab2:
         "Local_Friends",
         "Local_Next_Payment",
         "Local_Order_Cash",
-        "Local_Other_Cashback",  # Добавлена запятая
+        "Local_Other_Cashback",
         "Local_RemittanceStatus",
         "Подожди (Wait)",
         "Local_X5",
@@ -130,6 +182,7 @@ with tab2:
     for topic in unused_topics:
         st.markdown(f"- {topic}")
 
+
 # ============= TAB 3: ДА/НЕТ =============
 def render_phrases_grid(phrases, cols=3, color="#e0f7fa"):
     rows = [phrases[i:i+cols] for i in range(0, len(phrases), cols)]
@@ -145,6 +198,7 @@ def render_phrases_grid(phrases, cols=3, color="#e0f7fa"):
                                 font-size:14px;">{phrase}</div>""",
                 unsafe_allow_html=True
             )
+
 
 with tab3:
     st.markdown("### ✅ Интерпретации 'ДА'")
