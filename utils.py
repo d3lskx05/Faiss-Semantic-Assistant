@@ -11,7 +11,7 @@ import os
 # ---------- модель и морфологический разбор ----------
 @functools.lru_cache(maxsize=1)
 def get_model():
-    hf_model_id = "skatzR/USER-BGE-M3-MiniLM-L12-v2-Distilled"
+    hf_model_id = "skatzR/USER-BGE-M3-E5-Base-Distilled"
     return SentenceTransformer(hf_model_id)
 
 @functools.lru_cache(maxsize=1)
