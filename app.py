@@ -14,15 +14,23 @@ st.title("🤖 Проверка фраз")
 
 def read_system_metrics(interval=0.0):
     """
-    Возвращает tuple (cpu_percent, ram_percent, used_gb, total_gb).
+    Возвращает tuple (cpu_percent, ram_percent, rss_gb, total_gb).
+    - cpu_percent: загрузка CPU всей системы в процентах
+    - ram_percent: использование RAM системой в процентах (vm.percent)
+    - rss_gb: использование RAM текущим процессом (Resident Set Size) в ГБ
+    - total_gb: общий объём физической RAM системы в ГБ
     Если psutil не установлен — возвращает (None, None, None, None).
     """
     if psutil:
         cpu = psutil.cpu_percent(interval=interval)
         vm = psutil.virtual_memory()
-        used_gb = vm.used / 1024 ** 3
+
+        # Память текущего процесса (RSS) — реальное потребление ОЗУ приложением
+        process = psutil.Process()
+        rss_gb = process.memory_info().rss / 1024 ** 3
+
         total_gb = vm.total / 1024 ** 3
-        return cpu, vm.percent, used_gb, total_gb
+        return cpu, vm.percent, rss_gb, total_gb
     return None, None, None, None
 
 
@@ -32,10 +40,10 @@ cpu_ph = sys_cols[0].empty()
 ram_ph = sys_cols[1].empty()
 lat_ph = sys_cols[2].empty()
 
-cpu, ram_pct, used_gb, total_gb = read_system_metrics()
+cpu, ram_pct, rss_gb, total_gb = read_system_metrics()
 if cpu is not None:
     cpu_ph.metric("CPU", f"{cpu:.1f}%")
-    ram_ph.metric("RAM", f"{used_gb:.1f}/{total_gb:.1f} ГБ ({ram_pct:.0f}%)")
+    ram_ph.metric("RAM", f"{rss_gb:.1f}/{total_gb:.1f} ГБ ({ram_pct:.0f}%)")
 else:
     cpu_ph.text("psutil не установлен")
     ram_ph.text("psutil не установлен")
@@ -140,10 +148,10 @@ with tab1:
 
             # --- обновляем метрики после запроса ---
             elapsed_ms = (time.perf_counter() - start) * 1000.0
-            cpu, ram_pct, used_gb, total_gb = read_system_metrics(interval=0.05)
+            cpu, ram_pct, rss_gb, total_gb = read_system_metrics(interval=0.05)
             if cpu is not None:
                 cpu_ph.metric("CPU", f"{cpu:.1f}%")
-                ram_ph.metric("RAM", f"{used_gb:.1f}/{total_gb:.1f} ГБ ({ram_pct:.0f}%)")
+                ram_ph.metric("RAM", f"{rss_gb:.1f}/{total_gb:.1f} ГБ ({ram_pct:.0f}%)")
             else:
                 cpu_ph.text("psutil не установлен")
                 ram_ph.text("psutil не установлен")
